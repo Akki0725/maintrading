@@ -1,7 +1,7 @@
 // backend/layers/commodity.js
 // Stage 2B — Supply chain costs and commodity price impact on margins
 
-const { fetchYFChart } = require('../utils/fetcher')
+const { fetchPriceHistory } = require('../utils/fetcher')
 const { normalise, deterministicScore, clamp } = require('../utils/scorer')
 
 const LAYER_ID = 'commodity'
@@ -30,7 +30,7 @@ async function analyze(ticker, context = {}) {
 
   try {
     // ── Fetch relevant commodities ────────────────────────────
-    const fetches = profile.tickers.map(t => fetchYFChart(t, '1mo', '1d'))
+    const fetches = profile.tickers.map(t => fetchPriceHistory(t, '1mo', '1d'))
     const results = await Promise.all(fetches)
 
     // Need at least one valid result

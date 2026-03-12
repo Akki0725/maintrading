@@ -1,7 +1,7 @@
 // backend/discovery/scanner.js
 // Autonomous scanner: hunts the universe for high-convergence setups
 
-const { fetchYFChart, fetchYFSummary, fetchYFNews } = require('../utils/fetcher')
+const { fetchPriceHistory, fetchYFSummary, fetchYFNews } = require('../utils/fetcher')
 const { computeMomentumScore, scoreText, deterministicScore, clamp } = require('../utils/scorer')
 const { buildVector } = require('../memory/vectorStore')
 
@@ -29,7 +29,7 @@ async function quickScore(ticker) {
   const t0 = Date.now()
   try {
     const [candles, news] = await Promise.all([
-      fetchYFChart(ticker, '3mo', '1d'),
+      fetchPriceHistory(ticker, '3mo', '1d'),
       fetchYFNews(ticker, 10),
     ])
 
@@ -48,6 +48,10 @@ async function quickScore(ticker) {
     // ── Price data ────────────────────────────────────────────
     const closes = candles?.map(d => d.close).filter(Boolean) || []
     const lastPrice = closes.at(-1) || 0
+    const prevClose = closes.length >= 2 ? closes.at(-2) : null
+    const ret1 = prevClose
+      ? (lastPrice - prevClose) / prevClose
+      : deterministicScore(ticker, 'ret1') * 0.02
     const ret5 = closes.length >= 6
       ? (closes.at(-1) - closes.at(-6)) / closes.at(-6)
       : deterministicScore(ticker, 'ret5') * 0.05
@@ -73,7 +77,7 @@ async function quickScore(ticker) {
       direction,
       thesis,
       lastPrice:    +lastPrice.toFixed(2),
-      ret5d:        +(ret5 * 100).toFixed(2),
+      ret1d:        +(ret1 * 100).toFixed(2),
       momentumScore: +momtScore.toFixed(3),
       sentimentScore:+sentScore.toFixed(3),
       newsCount:    news?.length || 0,
@@ -92,7 +96,7 @@ async function quickScore(ticker) {
       direction:    score > 0.05 ? 'BULLISH' : score < -0.05 ? 'BEARISH' : 'NEUTRAL',
       thesis:       Math.abs(score) > 0.4 ? 'WATCH' : 'MONITOR',
       lastPrice:    0,
-      ret5d:        0,
+      ret1d:        0,
       momentumScore: score,
       sentimentScore: score * 0.8,
       newsCount:    0,

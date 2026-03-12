@@ -1,7 +1,7 @@
 // backend/layers/sector.js
 // Stage 0B — Sector rotation and relative strength vs. broad market
 
-const { fetchYFChart } = require('../utils/fetcher')
+const { fetchPriceHistory } = require('../utils/fetcher')
 const { normalise, deterministicScore, buildSparkline, clamp } = require('../utils/scorer')
 
 const LAYER_ID = 'sector'
@@ -32,9 +32,9 @@ async function analyze(ticker, context = {}) {
 
   try {
     const [etfData, spyData, tickerData] = await Promise.all([
-      fetchYFChart(etf,  '3mo', '1d'),
-      fetchYFChart('SPY', '3mo', '1d'),
-      fetchYFChart(ticker, '3mo', '1d'),
+      fetchPriceHistory(etf,  '3mo', '1d'),
+      fetchPriceHistory('SPY', '3mo', '1d'),
+      fetchPriceHistory(ticker, '3mo', '1d'),
     ])
 
     if (!etfData || !spyData) throw new Error('Sector data unavailable')

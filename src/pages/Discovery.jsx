@@ -64,8 +64,8 @@ function SetupCard({ item, onSelect, rank }) {
         </div>
         <div style={{ textAlign: 'right' }}>
           {item.lastPrice > 0 && <div style={{ fontFamily: 'IBM Plex Mono', fontSize: 13, color: '#e8e8f0' }}>${item.lastPrice.toFixed(2)}</div>}
-          <div style={{ fontFamily: 'IBM Plex Mono', fontSize: 11, color: item.ret5d >= 0 ? '#00ff88' : '#ff3355' }}>
-            {item.ret5d >= 0 ? '+' : ''}{item.ret5d?.toFixed(2)}% 5d
+          <div style={{ fontFamily: 'IBM Plex Mono', fontSize: 11, color: item.ret1d >= 0 ? '#00ff88' : '#ff3355' }}>
+            {item.ret1d >= 0 ? '+' : ''}{item.ret1d?.toFixed(2)}% 1D
           </div>
         </div>
       </div>
@@ -125,6 +125,15 @@ export default function Discovery({ setSelectedStock, setActivePage }) {
 
   useEffect(() => { scan(limit) }, [limit])
 
+  // Auto-rescan the universe periodically.
+  // With 30 tickers and Alpaca's 200 calls/min limit, a 15s interval keeps us well under the cap.
+  useEffect(() => {
+    const id = setInterval(() => {
+      scan(limit)
+    }, 15000)
+    return () => clearInterval(id)
+  }, [limit, scan])
+
   const handleSelect = (ticker) => {
     setSelectedStock(ticker)
     setActivePage('dashboard')
@@ -138,7 +147,7 @@ export default function Discovery({ setSelectedStock, setActivePage }) {
     return true
   })
   const sorted = [...filtered].sort((a, b) => {
-    if (sortBy === 'ret5d')    return b.ret5d - a.ret5d
+    if (sortBy === 'ret1d')    return b.ret1d - a.ret1d
     if (sortBy === 'score')    return Math.abs(b.score) - Math.abs(a.score)
     return b.convergence - a.convergence
   })
@@ -206,7 +215,7 @@ export default function Discovery({ setSelectedStock, setActivePage }) {
         ))}
         <div style={{ flex: 1 }} />
         <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9, color: '#404060' }}>SORT:</span>
-        {[['convergence', 'CONVERGENCE'], ['score', 'SCORE'], ['ret5d', '5D RETURN']].map(([k, l]) => (
+        {[['convergence', 'CONVERGENCE'], ['score', 'SCORE'], ['ret1d', '1D RETURN']].map(([k, l]) => (
           <button key={k} onClick={() => setSortBy(k)} style={{
             padding: '4px 10px', fontFamily: 'IBM Plex Mono', fontSize: 9,
             background: sortBy === k ? 'rgba(68,102,255,0.10)' : 'transparent',

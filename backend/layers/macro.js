@@ -1,7 +1,7 @@
 // backend/layers/macro.js
 // Stage 0A — Big Picture: interest rates, volatility regime, yield curve
 
-const { fetchYFChart, fetchFRED } = require('../utils/fetcher')
+const { fetchPriceHistory, fetchFRED } = require('../utils/fetcher')
 const { normalise, deterministicScore, buildSparkline, clamp } = require('../utils/scorer')
 
 const LAYER_ID = 'macro'
@@ -21,10 +21,10 @@ async function analyze(ticker, context = {}) {
   try {
     // ── Fetch macro instruments in parallel ──────────────────
     const [vixData, tnxData, irxData, spData] = await Promise.all([
-      fetchYFChart(MACRO_TICKERS.vix,   '1mo', '1d'),
-      fetchYFChart(MACRO_TICKERS.tnx,   '1mo', '1d'),
-      fetchYFChart(MACRO_TICKERS.irx,   '1mo', '1d'),
-      fetchYFChart(MACRO_TICKERS.sp500, '3mo', '1d'),
+      fetchPriceHistory(MACRO_TICKERS.vix,   '1mo', '1d'),
+      fetchPriceHistory(MACRO_TICKERS.tnx,   '1mo', '1d'),
+      fetchPriceHistory(MACRO_TICKERS.irx,   '1mo', '1d'),
+      fetchPriceHistory(MACRO_TICKERS.sp500, '3mo', '1d'),
     ])
 
     if (!vixData || !tnxData || !spData) throw new Error('Macro data unavailable')

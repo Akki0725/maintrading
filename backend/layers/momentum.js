@@ -1,7 +1,7 @@
 // backend/layers/momentum.js
 // Stage 4A — Execution Timing: price momentum, RSI, MACD, volume trend
 
-const { fetchYFChart } = require('../utils/fetcher')
+const { fetchPriceHistory } = require('../utils/fetcher')
 const { computeRSI, computeMomentumScore, buildSparkline, normalise, deterministicScore, clamp } = require('../utils/scorer')
 
 const LAYER_ID = 'momentum'
@@ -10,7 +10,7 @@ async function analyze(ticker, context = {}) {
   const sources = { live: false }
 
   try {
-    const candles = await fetchYFChart(ticker, '6mo', '1d')
+    const candles = await fetchPriceHistory(ticker, '6mo', '1d')
     if (!candles || candles.length < 30) throw new Error('Insufficient price data')
     sources.live = true
 

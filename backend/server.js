@@ -10,6 +10,7 @@ const {
   saveSnapshot, getSnapshots, getMemoryStats,
   checkForAlerts, findSimilarPatterns, buildVector, updateOutcome,
 } = require('./memory/vectorStore')
+const { fetchPriceHistory } = require('./utils/fetcher')
 
 const app  = express()
 const PORT = process.env.PORT || 3001
@@ -82,6 +83,44 @@ app.get('/api/analyze/:ticker', async (req, res) => {
     const alerts = checkForAlerts(ticker, result.vector, 0.88)
     res.json({ ...result, memoryAlerts: alerts, snapshotSaved: saved.saved })
   } catch (err) {
+    res.status(500).json({ error: err.message, ticker })
+  }
+})
+
+// ─────────────────────────────────────────────────────────────
+// Price History / Quotes (Alpha Vantage–backed via fetchPriceHistory)
+// ─────────────────────────────────────────────────────────────
+
+/** GET /api/price/:ticker — Daily candles + last price and 1D change */
+app.get('/api/price/:ticker', async (req, res) => {
+  const ticker = req.params.ticker.toUpperCase().trim()
+  if (!ticker || ticker.length > 10) {
+    return res.status(400).json({ error: 'Invalid ticker' })
+  }
+
+  try {
+    const candles = await fetchPriceHistory(ticker, '6mo', '1d')
+    if (!candles || candles.length === 0) {
+      return res.status(502).json({ error: 'No price data available', ticker })
+    }
+    const last = candles.at(-1)
+    const prev = candles.length >= 2 ? candles.at(-2) : null
+    const lastClose = last?.close ?? 0
+    const prevClose = prev?.close ?? null
+    const changePct = prevClose && prevClose !== 0
+      ? ((lastClose - prevClose) / prevClose) * 100
+      : null
+    res.json({
+      ticker,
+      candles,
+      lastPrice: lastClose,
+      prevClose,
+      changePct,
+      asOf: last?.date || null,
+      source: 'alpaca_pref_alpha_vantage_yahoo_fallback',
+    })
+  } catch (err) {
+    console.error('[price] error:', err.message)
     res.status(500).json({ error: err.message, ticker })
   }
 })

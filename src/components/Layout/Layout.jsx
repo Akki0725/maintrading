@@ -12,7 +12,51 @@ const NAV_ITEMS = [
 ]
 
 function Ticker() {
-  const items = [...TICKER_DATA, ...TICKER_DATA]
+  const [items, setItems] = useState([...TICKER_DATA, ...TICKER_DATA])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function refresh() {
+      const isLive = await checkBackend()
+      if (!isLive) {
+        if (!cancelled) setItems([...TICKER_DATA, ...TICKER_DATA])
+        return
+      }
+
+      try {
+        const updated = await Promise.all(
+          TICKER_DATA.map(async (base) => {
+            try {
+              const res = await fetch(`/api/price/${base.symbol}`)
+              if (!res.ok) return base
+              const data = await res.json()
+              const last = typeof data.lastPrice === 'number' && data.lastPrice > 0 ? data.lastPrice : base.price
+              const changePct = typeof data.changePct === 'number'
+                ? data.changePct
+                : base.change
+              return { ...base, price: last, change: changePct }
+            } catch {
+              return base
+            }
+          })
+        )
+        if (!cancelled) {
+          setItems([...updated, ...updated])
+        }
+      } catch {
+        if (!cancelled) setItems([...TICKER_DATA, ...TICKER_DATA])
+      }
+    }
+
+    refresh()
+    const id = setInterval(refresh, 15000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [])
+
   return (
     <div style={{ background: '#080810', borderBottom: '1px solid #1e1e35', height: '32px', overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
       <div style={{ background: '#4466ff', padding: '0 12px', height: '100%', display: 'flex', alignItems: 'center', flexShrink: 0, fontSize: '10px', fontFamily: 'IBM Plex Mono', fontWeight: 600, color: 'white', letterSpacing: '0.1em' }}>
@@ -66,6 +110,7 @@ export default function Layout({ children, activePage, setActivePage, selectedSt
   }
 
   const currentEvent = MARKET_EVENTS[eventIdx]
+  const marketOpen = isUsEquitiesMarketOpen(time)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#050508' }}>
@@ -96,8 +141,16 @@ export default function Layout({ children, activePage, setActivePage, selectedSt
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <div className="live-dot" />
-          <span style={{ fontFamily: 'IBM Plex Mono', fontSize: '10px', color: '#00ff88' }}>MARKET OPEN</span>
+          <div
+            className="live-dot"
+            style={{
+              background: marketOpen ? '#00ff88' : '#ff3355',
+              boxShadow: marketOpen ? '0 0 6px #00ff88' : '0 0 6px #ff3355',
+            }}
+          />
+          <span style={{ fontFamily: 'IBM Plex Mono', fontSize: '10px', color: marketOpen ? '#00ff88' : '#ff3355' }}>
+            MARKET {marketOpen ? 'OPEN' : 'CLOSED'}
+          </span>
         </div>
 
         {/* Backend brain status */}
@@ -191,4 +244,28 @@ export default function Layout({ children, activePage, setActivePage, selectedSt
 
 function getSeverityColor(severity) {
   return { HIGH: '#ff3355', MEDIUM: '#ffcc00', LOW: '#7070a0' }[severity] || '#7070a0'
+}
+
+function isUsEquitiesMarketOpen(now = new Date()) {
+  // NYSE/Nasdaq regular trading hours: Mon–Fri, 9:30–16:00 America/New_York.
+  // This intentionally ignores market holidays / half-days (can be added later).
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(now)
+
+  const weekday = parts.find(p => p.type === 'weekday')?.value
+  const hour = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10)
+  const minute = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10)
+
+  const isWeekend = weekday === 'Sat' || weekday === 'Sun'
+  if (isWeekend) return false
+
+  const minutes = hour * 60 + minute
+  const open = 9 * 60 + 30
+  const close = 16 * 60
+  return minutes >= open && minutes < close
 }

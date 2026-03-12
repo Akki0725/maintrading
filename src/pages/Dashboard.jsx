@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { STOCKS, generatePriceHistory, generatePrediction } from '../data/mockData'
 import ConvergenceTree from '../components/ConvergenceTree/ConvergenceTree'
-import { useAnalysis } from '../hooks/useBackend'
+import { useAnalysis, checkBackend } from '../hooks/useBackend'
 
 function CustomTooltip({ active, payload, label }) {
   if (active && payload?.length) {
@@ -18,7 +18,7 @@ function CustomTooltip({ active, payload, label }) {
   return null
 }
 
-function StockHeader({ stock, prediction }) {
+function StockHeader({ stock, prediction, price }) {
   const predColor = prediction?.direction === 'BULLISH' ? '#00ff88'
                   : prediction?.direction === 'BEARISH' ? '#ff3355' : '#ffcc00'
   return (
@@ -36,7 +36,7 @@ function StockHeader({ stock, prediction }) {
           {stock.sector}
         </span>
         <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 22, fontWeight: 300, color: '#e8e8f0' }}>
-          ${stock.price.toFixed(2)}
+          ${price.toFixed(2)}
         </span>
         <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 13, color: stock.change >= 0 ? '#00ff88' : '#ff3355' }}>
           {stock.change >= 0 ? '+' : ''}{stock.changeAmt.toFixed(2)} ({stock.change >= 0 ? '+' : ''}{stock.change}%)
@@ -78,6 +78,7 @@ export default function Dashboard({ selectedStock, setSelectedStock }) {
   const { signals, loading: analysisLoading, source: dataSource, metadata, analyze } = useAnalysis()
   const [prediction, setPrediction] = useState(null)
   const [priceHistory, setPriceHistory] = useState([])
+  const [livePrice, setLivePrice] = useState(null)
   const [view, setView]             = useState('tree')
 
   const stock = STOCKS.find(s => s.symbol === selectedStock) || STOCKS[0]
@@ -85,8 +86,42 @@ export default function Dashboard({ selectedStock, setSelectedStock }) {
   useEffect(() => {
     // Trigger real or mock analysis
     analyze(selectedStock)
-    // Price history is always generated locally (display only)
-    setPriceHistory(generatePriceHistory(stock.price))
+
+    let cancelled = false
+    ;(async () => {
+      const isLive = await checkBackend()
+      if (!isLive) {
+        if (!cancelled) {
+          setPriceHistory(generatePriceHistory(stock.price))
+          setLivePrice(stock.price)
+        }
+        return
+      }
+
+      try {
+        const res = await fetch(`/api/price/${selectedStock}`)
+        if (!res.ok) throw new Error(`Price fetch failed: ${res.status}`)
+        const data = await res.json()
+        if (cancelled) return
+        const candles = Array.isArray(data.candles) ? data.candles : []
+        setPriceHistory(
+          candles.map(c => ({
+            date: c.date,
+            close: c.close,
+          }))
+        )
+        const lastClose = candles.length ? candles[candles.length - 1].close : stock.price
+        setLivePrice(typeof data.lastPrice === 'number' && data.lastPrice > 0 ? data.lastPrice : lastClose)
+      } catch {
+        if (cancelled) return
+        setPriceHistory(generatePriceHistory(stock.price))
+        setLivePrice(stock.price)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
   }, [selectedStock])
 
   // Compute prediction from signals whenever they change
@@ -169,7 +204,7 @@ export default function Dashboard({ selectedStock, setSelectedStock }) {
       )}
 
       {/* Stock header */}
-      <StockHeader stock={stock} prediction={prediction} />
+      <StockHeader stock={stock} prediction={prediction} price={livePrice ?? stock.price} />
 
       {/* Main content */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
