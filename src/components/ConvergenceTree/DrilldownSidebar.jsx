@@ -3,7 +3,7 @@ import { sparklinePath } from '../../utils/convergenceLogic'
 
 const LAYER_META = {
   macro:       { shortName: 'MACRO', color: '#ff55aa', label: 'Macroeconomic', icon: '🌐',
-                 rawKeys: ['Interest Rates', 'CPI YoY', 'GDP Growth', 'PMI Index', 'Recession Prob'] },
+                 rawKeys: ['10Y Treasury', 'CPI YoY', 'GDP Growth', 'MFG (Philly Fed)', 'VIX', 'Yield Spread', 'HY Spread', 'HY 20d Chg%', 'DXY 20d Chg%', 'High Vol'] },
   sector:      { shortName: 'SECT',  color: '#8855ff', label: 'Sector & Industry', icon: '🏭',
                  rawKeys: ['Sector ETF 1M', 'Peer Rel Strength', 'Industry Rotation', 'Breadth %'] },
   event:       { shortName: 'EVENT', color: '#ffcc00', label: 'Event Detection', icon: '⚠️',
@@ -36,15 +36,18 @@ function Sparkline({ data, color, width = 100, height = 32 }) {
 }
 
 function SubSignalRow({ sub }) {
-  const c = sub.score > 0.1 ? '#00ff88' : sub.score < -0.1 ? '#ff3355' : '#ffcc00'
+  if (!sub || typeof sub !== 'object') return null
+  const score = Number(sub.score)
+  const safeSubScore = Number.isFinite(score) ? score : 0
+  const c = safeSubScore > 0.1 ? '#00ff88' : safeSubScore < -0.1 ? '#ff3355' : '#ffcc00'
   return (
     <div style={{ marginBottom: 7 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-        <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9, color: '#7070a0' }}>{sub.name}</span>
-        <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9, color: c }}>{sub.score >= 0 ? '+' : ''}{sub.score.toFixed(2)}</span>
+        <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9, color: '#7070a0' }}>{sub.name ?? '—'}</span>
+        <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9, color: c }}>{safeSubScore >= 0 ? '+' : ''}{safeSubScore.toFixed(2)}</span>
       </div>
       <div style={{ height: 3, background: '#1a1a2e', borderRadius: 2, position: 'relative', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', height: '100%', width: `${Math.abs(sub.score) * 50}%`, background: c, left: sub.score > 0 ? '50%' : `${50 - Math.abs(sub.score) * 50}%` }} />
+        <div style={{ position: 'absolute', height: '100%', width: `${Math.min(100, Math.abs(safeSubScore) * 50)}%`, background: c, left: safeSubScore > 0 ? '50%' : `${50 - Math.min(50, Math.abs(safeSubScore) * 50)}%` }} />
         <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: '#2a2a4a' }} />
       </div>
     </div>
@@ -61,12 +64,32 @@ function RawDataRow({ label, value, score }) {
   )
 }
 
-// Generate mock "raw data" values deterministically
+/** Build macro raw data rows from backend FRED-backed rawData (no mock). */
+function macroRawValuesFromSignal(signal) {
+  const raw = signal?.rawData
+  if (!raw || typeof raw !== 'object') return null
+  const fmt = (v, suf = '') => (v != null && v !== '') ? `${v}${suf}` : '—'
+  const rows = [
+    [fmt(raw.tnxLast, '%'), raw.tnxLast > 4 ? -1 : raw.tnxLast < 2 ? 1 : 0],
+    [fmt(raw.cpiYoY, '% YoY'), raw.cpiYoY != null ? (raw.cpiYoY > 3 ? -1 : raw.cpiYoY < 2 ? 1 : 0) : 0],
+    [fmt(raw.gdpGrowthQ, '%'), raw.gdpGrowthQ != null ? (raw.gdpGrowthQ > 2 ? 1 : raw.gdpGrowthQ < 0 ? -1 : 0) : 0],
+    [fmt(raw.pmi), raw.pmi != null ? (raw.pmi > 0 ? 1 : raw.pmi < 0 ? -1 : 0) : 0],
+    [fmt(raw.vixLast), raw.vixLast > 25 ? -1 : raw.vixLast < 15 ? 1 : 0],
+    [fmt(raw.yieldSpread, '%'), raw.yieldSpread != null ? (raw.yieldSpread > 0 ? 1 : -1) : 0],
+    [fmt(raw.hySpreadLast, ' bps'), 0],
+    [fmt(raw.hyPctChg20d, '%'), raw.hyPctChg20d != null ? (raw.hyPctChg20d > 0 ? -1 : 0) : 0],
+    [fmt(raw.dxyPctChg20d, '%'), raw.dxyPctChg20d != null ? (raw.dxyPctChg20d > 0 ? -1 : 0) : 0],
+    [raw.isHighVol ? 'Yes' : 'No', raw.isHighVol ? -1 : 0],
+  ]
+  return rows
+}
+
+// Generate mock "raw data" values deterministically (used only when backend rawData not available)
 function generateRawValues(layerId, score) {
   const seed = layerId.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
   const rng = (i) => { const x = Math.sin(seed + i * 7.3) * 10000; return x - Math.floor(x) }
   const rawKeyMap = {
-    macro:       [['2.83%', 1], ['5.2% YoY', score], ['2.1%', score], ['51.4', score], [`${(15 + rng(0)*25).toFixed(0)}%`, -score]],
+    macro:       [['—', 0], ['—', 0], ['—', 0], ['—', 0], ['—', 0], ['—', 0], ['—', 0], ['—', 0], ['—', 0], ['—', 0]],
     sector:      [[`${(score*4).toFixed(1)}%`, score], [`${(score*1.5+rng(1)*10-5).toFixed(1)}%`, score], [score > 0 ? 'INTO' : 'OUT', score], [`${(45+score*25+rng(2)*15).toFixed(0)}%`, score]],
     event:       [['EARNINGS', score], [score > 0.3 ? 'HIGH' : 'MEDIUM', score], [`${(5+rng(3)*10).toFixed(0)}d`, 0], [score > 0 ? 'POSITIVE' : 'NEGATIVE', score]],
     sentiment:   [[`${(score*0.5+0.5).toFixed(2)}`, score], [`${(1+rng(4)*4).toFixed(1)}x avg`, score], [score > 0 ? 'POSITIVE' : 'CAUTIOUS', score], [score > 0.2 ? 'UPGRADE' : 'NEUTRAL', score]],
@@ -89,14 +112,37 @@ export default function DrilldownSidebar({
 
   const layerId = node.data?.signal?.id || node.id
   const meta = LAYER_META[layerId]
-  if (!meta) return null  // Stage or thesis nodes use a simpler view
-
-  const signal = signals.find(s => s.id === layerId)
-  const score  = node.data?.score ?? signal?.score ?? 0
+  const signal = Array.isArray(signals) ? signals.find(s => s && s.id === layerId) : undefined
+  const rawScore = node.data?.score ?? signal?.score ?? 0
+  const score = Number(rawScore)
+  const safeScore = Number.isFinite(score) ? score : 0
   const isSimulated = simulatedOverrides?.[layerId] !== undefined
-  const simValue = simulatedOverrides?.[layerId] ?? score
-  const scoreColor = score > 0.12 ? '#00ff88' : score < -0.12 ? '#ff3355' : '#ffcc00'
-  const rawValues = generateRawValues(layerId, score)
+  const simValueRaw = simulatedOverrides?.[layerId] ?? safeScore
+  const simValue = Number(simValueRaw)
+  const safeSimValue = Number.isFinite(simValue) ? simValue : safeScore
+  const scoreColor = safeScore > 0.12 ? '#00ff88' : safeScore < -0.12 ? '#ff3355' : '#ffcc00'
+
+  if (!meta) {
+    return (
+      <div style={{
+        position: 'absolute', right: 0, top: 0, bottom: 0, width: 320,
+        background: '#09090f', borderLeft: '1px solid #1e1e35',
+        display: 'flex', flexDirection: 'column', zIndex: 50,
+      }}>
+        <div style={{ padding: 14, borderBottom: '1px solid #1e1e35', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 11, color: '#7070a0' }}>Layer details not available</span>
+          <button onClick={onClose} style={{ background: 'none', border: '1px solid #1e1e35', color: '#7070a0', cursor: 'pointer', fontSize: 14, width: 26, height: 26, borderRadius: 3 }}>×</button>
+        </div>
+        <div style={{ flex: 1, padding: 16, fontFamily: 'IBM Plex Mono', fontSize: 9, color: '#404060' }}>
+          Unknown layer: {String(layerId)}
+        </div>
+      </div>
+    )
+  }
+  const rawValues = layerId === 'macro' && signal?.rawData
+    ? macroRawValuesFromSignal(signal)
+    : null
+  const rawValuesToShow = rawValues ?? generateRawValues(layerId, safeScore)
 
   const handleSimChange = (val) => {
     onSimulate(layerId, +val)
@@ -135,11 +181,16 @@ export default function DrilldownSidebar({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
           <div>
             <div style={{ fontFamily: 'IBM Plex Mono', fontSize: 28, fontWeight: 700, color: scoreColor, lineHeight: 1 }}>
-              {score >= 0 ? '+' : ''}{score.toFixed(3)}
+              {safeScore >= 0 ? '+' : ''}{safeScore.toFixed(3)}
             </div>
             <div style={{ fontFamily: 'IBM Plex Mono', fontSize: 9, color: '#404060', marginTop: 2 }}>
               {isSimulated ? '⚙ SIMULATED VALUE' : 'CURRENT SCORE'}
             </div>
+            {layerId === 'macro' && signal?.rawData?.scoreFromLiveData && !isSimulated && (
+              <div style={{ fontFamily: 'IBM Plex Mono', fontSize: 8, color: '#00ff88', marginTop: 4, letterSpacing: '0.05em' }}>
+                ● Calculated from live FRED data
+              </div>
+            )}
           </div>
           <Sparkline data={node.data?.sparkline} color={meta.color} />
         </div>
@@ -161,7 +212,7 @@ export default function DrilldownSidebar({
         </div>
 
         {/* ── Sub-signals ──────────────────────────────────────── */}
-        {signal?.subSignals && (
+        {signal?.subSignals && Array.isArray(signal.subSignals) && signal.subSignals.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontFamily: 'IBM Plex Mono', fontSize: 9, color: '#404060', letterSpacing: '0.1em', marginBottom: 8 }}>
               SUB-SIGNALS
@@ -187,11 +238,13 @@ export default function DrilldownSidebar({
             </span>
           </button>
 
-          {rawExpanded && (
+          {rawExpanded && Array.isArray(rawValuesToShow) && (
             <div style={{ background: '#0c0c18', border: '1px solid #1e1e35', borderTop: 'none', borderRadius: '0 0 4px 4px', padding: '4px 12px 8px' }}>
-              {rawValues.map(([val, s], i) => (
-                <RawDataRow key={i} label={meta.rawKeys?.[i] || `Value ${i+1}`} value={val} score={s} />
-              ))}
+              {rawValuesToShow.map((row, i) => {
+                const [val, s] = Array.isArray(row) ? row : [row, 0]
+                const scoreNum = Number(s)
+                return <RawDataRow key={i} label={meta.rawKeys?.[i] || `Value ${i+1}`} value={val} score={Number.isFinite(scoreNum) ? scoreNum : 0} />
+              })}
             </div>
           )}
         </div>
@@ -222,13 +275,13 @@ export default function DrilldownSidebar({
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                 <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9, color: '#ff3355' }}>-1.00</span>
                 <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 11, fontWeight: 700, color: '#4466ff' }}>
-                  {(+simValue).toFixed(2)}
+                  {(safeSimValue).toFixed(2)}
                 </span>
                 <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9, color: '#00ff88' }}>+1.00</span>
               </div>
               <input
                 type="range" min={-100} max={100} step={1}
-                value={Math.round((+simValue) * 100)}
+                value={Math.max(-100, Math.min(100, Math.round(safeSimValue * 100)))}
                 onChange={e => handleSimChange((+e.target.value) / 100)}
                 style={{ width: '100%', accentColor: '#4466ff', marginBottom: 8 }}
               />

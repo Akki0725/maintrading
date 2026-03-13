@@ -230,11 +230,13 @@ async function fetchReddit(query, subreddit = 'wallstreetbets', sort = 'new', ti
 
 /**
  * FRED API — returns latest observations or null
+ * @param {string} seriesId - FRED series ID (e.g. DGS10, VIXCLS)
+ * @param {number} [limit=10] - Max observations (desc = newest first). Use 65+ for ~3mo daily trends.
  */
-async function fetchFRED(seriesId) {
+async function fetchFRED(seriesId, limit = 10) {
   const key = process.env.FRED_API_KEY
   if (!key || key === 'your_fred_key_here') return null
-  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${seriesId}&api_key=${key}&file_type=json&sort_order=desc&limit=10`
+  const url = `https://api.stlouisfed.org/fred/series/observations?series_id=${encodeURIComponent(seriesId)}&api_key=${key}&file_type=json&sort_order=desc&limit=${Math.min(500, Math.max(1, limit))}`
   const data = await safeFetch(url, { _label: `FRED ${seriesId}` })
   return data?.observations || null
 }
