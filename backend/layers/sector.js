@@ -1,8 +1,8 @@
 // backend/layers/sector.js
 // Stage 0B — Sector rotation and relative strength vs. broad market
 
-const { fetchPriceHistory } = require('../utils/fetcher')
-const { normalise, deterministicScore, buildSparkline, clamp } = require('../utils/scorer')
+const { fetchAlpacaDailySdk } = require('../utils/alpacaSdk')
+const { normalise, buildSparkline, clamp } = require('../utils/scorer')
 
 const LAYER_ID = 'sector'
 
@@ -10,18 +10,23 @@ const LAYER_ID = 'sector'
 const SECTOR_MAP = {
   // Technology
   NVDA: 'XLK', AAPL: 'XLK', MSFT: 'XLK', AMD: 'XLK', INTC: 'XLK',
+  CRM: 'XLK', PLTR: 'XLK', ORCL: 'XLK', IBM: 'XLK',
   GOOGL: 'XLC', META: 'XLC', NFLX: 'XLC',
   AMZN: 'XLY', TSLA: 'XLY',
-  // Financials
-  JPM: 'XLF', GS: 'XLF', BAC: 'XLF', V: 'XLF', MA: 'XLF',
+  DIS: 'XLY', NKE: 'XLY',
+  // Financials / Fintech
+  JPM: 'XLF', GS: 'XLF', BAC: 'XLF', V: 'XLF', MA: 'XLF', PYPL: 'XLF', COIN: 'XLF',
   // Energy
   XOM: 'XLE', CVX: 'XLE',
   // Healthcare
   JNJ: 'XLV', PFE: 'XLV',
-  // Consumer
+  // Industrials / Aerospace
+  BA: 'XLI',
+  // Consumer Staples
   WMT: 'XLP',
-  // Fintech/Crypto
-  PYPL: 'XLF', COIN: 'XLF',
+  // Broad market / index ETFs
+  SPY: 'SPY',
+  QQQ: 'QQQ',
   // Default
   DEFAULT: 'SPY',
 }
@@ -32,12 +37,12 @@ async function analyze(ticker, context = {}) {
 
   try {
     const [etfData, spyData, tickerData] = await Promise.all([
-      fetchPriceHistory(etf,  '3mo', '1d'),
-      fetchPriceHistory('SPY', '3mo', '1d'),
-      fetchPriceHistory(ticker, '3mo', '1d'),
+      fetchAlpacaDailySdk(etf, 90),
+      fetchAlpacaDailySdk('SPY', 90),
+      fetchAlpacaDailySdk(ticker, 90),
     ])
 
-    if (!etfData || !spyData) throw new Error('Sector data unavailable')
+    if (!etfData || !spyData || etfData.length < 21 || spyData.length < 21) throw new Error('Sector data unavailable')
     sources.live = true
 
     // ── ETF momentum ──────────────────────────────────────────
@@ -80,36 +85,26 @@ async function analyze(ticker, context = {}) {
       weight: 0.11,
       reasoning: buildReasoning(ticker, etf, etfRet20, relPerf, spyRet20, score),
       subSignals: [
-        { name: `${etf} 20d Return`,     score: +etfScore.toFixed(2) },
-        { name: 'Relative vs SPY',        score: +relScore.toFixed(2) },
+        { name: 'Sector ETF 1M',          score: +etfScore.toFixed(2) },
+        { name: 'Peer Rel Strength',      score: +relScore.toFixed(2) },
         { name: 'Ticker vs Sector',       score: +tickerRelScore.toFixed(2) },
         { name: 'Momentum Acceleration',  score: +momentumAcc.toFixed(2) },
       ],
       sparkline,
-      rawData: { etf, etfRet20: +(etfRet20*100).toFixed(2), spyRet20: +(spyRet20*100).toFixed(2), relPerf: +(relPerf*100).toFixed(2) },
+      rawData: {
+        source: 'alpaca',
+        etf,
+        etfRet20Pct: +(etfRet20 * 100).toFixed(2),
+        spyRet20Pct: +(spyRet20 * 100).toFixed(2),
+        relPerfPct:  +(relPerf  * 100).toFixed(2),
+        etfRet5Pct:  +(etfRet5  * 100).toFixed(2),
+      },
       sources,
       _context: { sectorETF: etf, sectorScore: score },
     }
   } catch (err) {
-    const score = deterministicScore(ticker, LAYER_ID)
-    const etf   = SECTOR_MAP[ticker.toUpperCase()] || SECTOR_MAP.DEFAULT
-    return {
-      id: LAYER_ID,
-      score,
-      confidence: 0.45,
-      weight: 0.11,
-      reasoning: fallbackReasoning(ticker, etf, score),
-      subSignals: [
-        { name: `${etf} Momentum`,   score: +(score * 0.9).toFixed(2) },
-        { name: 'Relative vs SPY',   score: +(score * 0.8).toFixed(2) },
-        { name: 'Ticker vs Sector',  score: +(score * 0.6).toFixed(2) },
-        { name: 'Sector Breadth',    score: +(score * 0.7).toFixed(2) },
-      ],
-      sparkline: Array(16).fill(0).map((_, i) => score * (i / 15)),
-      rawData: { source: 'mock', etf },
-      sources,
-      _context: { sectorETF: etf, sectorScore: score },
-    }
+    // Propagate errors so the pipeline / API can decide how to handle missing sector data.
+    throw err
   }
 }
 
@@ -120,14 +115,6 @@ function buildReasoning(ticker, etf, etfRet, relPerf, spyRet, score) {
   return `${etf} sector ETF in ${sec} with ${(etfRet*100).toFixed(1)}% 20-day return vs SPY ${(spyRet*100).toFixed(1)}%. ` +
     `${ticker} sector is ${dir} the broad market by ${mag}%. ` +
     `${score > 0.3 ? 'Capital rotation into this sector is a tailwind.' : score < -0.3 ? 'Capital is flowing out of this sector — headwind.' : 'Sector dynamics are neutral at this time.'}`
-}
-
-function fallbackReasoning(ticker, etf, score) {
-  return score > 0.2
-    ? `${etf} sector showing relative strength vs S&P 500. Industry peers trending positively. ${ticker} should benefit from sector tailwind.`
-    : score < -0.2
-    ? `${etf} sector underperforming broad market. Capital rotation away from this space. Industry group headwinds likely to persist.`
-    : `${etf} sector performing in line with broader market. No significant rotation detected in either direction.`
 }
 
 module.exports = { analyze }

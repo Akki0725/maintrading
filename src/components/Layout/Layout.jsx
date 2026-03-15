@@ -50,7 +50,7 @@ function Ticker() {
     }
 
     refresh()
-    const id = setInterval(refresh, 15000)
+    const id = setInterval(refresh, 60000)
     return () => {
       cancelled = true
       clearInterval(id)

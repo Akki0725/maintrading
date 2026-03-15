@@ -134,33 +134,8 @@ async function fetchAVDaily(ticker, range = '3mo') {
 }
 
 /**
- * Yahoo Finance chart data — returns OHLCV array or null
- */
-async function fetchYFChart(ticker, range = '3mo', interval = '1d') {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=${interval}&includePrePost=false`
-  const data = await safeFetch(url, { _label: `YF chart ${ticker}` })
-  if (!data?.chart?.result?.[0]) return null
-
-  const result  = data.chart.result[0]
-  const ts      = result.timestamp || []
-  const quote   = result.indicators?.quote?.[0] || {}
-  const closes  = quote.close || []
-  const volumes = quote.volume || []
-  const highs   = quote.high || []
-  const lows    = quote.low || []
-
-  return ts.map((t, i) => ({
-    date:   new Date(t * 1000).toISOString().split('T')[0],
-    close:  closes[i],
-    high:   highs[i],
-    low:    lows[i],
-    volume: volumes[i],
-  })).filter(d => d.close != null)
-}
-
-/**
  * Unified price history helper — prefers Alpaca daily for regular equities,
- * then Alpha Vantage daily, and finally Yahoo Finance as a catch‑all.
+ * then Alpha Vantage daily.
  */
 async function fetchPriceHistory(ticker, range = '3mo', interval = '1d') {
   const isDaily = interval === '1d'
@@ -186,8 +161,8 @@ async function fetchPriceHistory(ticker, range = '3mo', interval = '1d') {
     }
   }
 
-  // 3) Fallback: Yahoo Finance (supports indices, futures, etc.)
-  return fetchYFChart(ticker, range, interval)
+  // No further fallbacks: if both Alpaca and Alpha Vantage fail, return null
+  return null
 }
 
 /**
@@ -243,7 +218,6 @@ async function fetchFRED(seriesId, limit = 10) {
 
 module.exports = {
   safeFetch,
-  fetchYFChart,
   fetchPriceHistory,
   fetchYFSummary,
   fetchYFNews,

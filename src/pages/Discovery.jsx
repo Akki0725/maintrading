@@ -126,11 +126,11 @@ export default function Discovery({ setSelectedStock, setActivePage }) {
   useEffect(() => { scan(limit) }, [limit])
 
   // Auto-rescan the universe periodically.
-  // With 30 tickers and Alpaca's 200 calls/min limit, a 15s interval keeps us well under the cap.
+  // With 30 tickers and Alpaca's 200 calls/min limit, a 60s interval keeps us well under the cap.
   useEffect(() => {
     const id = setInterval(() => {
       scan(limit)
-    }, 15000)
+    }, 60000)
     return () => clearInterval(id)
   }, [limit, scan])
 
