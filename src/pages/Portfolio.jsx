@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
-import { STOCKS, generatePortfolio, generateEquityCurve, generateLayerSignals, generatePrediction } from '../data/mockData'
+import { STOCKS } from '../data/constants'
+import { generatePrediction } from '../utils/prediction'
 
 function CustomTooltip({ active, payload, label }) {
   if (active && payload && payload.length) {
@@ -76,9 +77,20 @@ function OrderModal({ onClose, onSubmit }) {
   )
 }
 
+const EMPTY_EQUITY_CURVE = (() => {
+  const d = new Date()
+  const arr = []
+  for (let i = 60; i >= 0; i--) {
+    const date = new Date(d)
+    date.setDate(date.getDate() - i)
+    arr.push({ date: date.toISOString().split('T')[0], equity: 100000, benchmark: 100000 })
+  }
+  return arr
+})()
+
 export default function Portfolio() {
-  const [positions, setPositions] = useState(() => generatePortfolio())
-  const [equityCurve] = useState(() => generateEquityCurve(60))
+  const [positions, setPositions] = useState([])
+  const [equityCurve] = useState(EMPTY_EQUITY_CURVE)
   const [showOrder, setShowOrder] = useState(false)
   const [signals, setSignals] = useState({})
 
@@ -98,8 +110,7 @@ export default function Portfolio() {
   useEffect(() => {
     const sigs = {}
     positions.forEach(p => {
-      const s = generateLayerSignals(p.symbol)
-      sigs[p.symbol] = generatePrediction(s)
+      sigs[p.symbol] = generatePrediction([])
     })
     setSignals(sigs)
   }, [positions])

@@ -11,6 +11,7 @@ const {
   checkForAlerts, findSimilarPatterns, buildVector, updateOutcome,
 } = require('./memory/vectorStore')
 const { fetchPriceHistory } = require('./utils/fetcher')
+const { fetchAlpacaDailySdk, fetchAlpacaLatestPrice } = require('./utils/alpacaSdk')
 
 const app  = express()
 const PORT = process.env.PORT || 3001
@@ -91,7 +92,9 @@ app.get('/api/analyze/:ticker', async (req, res) => {
 // Price History / Quotes (Alpha Vantage–backed via fetchPriceHistory)
 // ─────────────────────────────────────────────────────────────
 
-/** GET /api/price/:ticker — Daily candles + last price and 1D change */
+/** GET /api/price/:ticker — Daily candles + last price and 1D change
+ *  Prefers Alpaca SDK (same path as test scripts) and falls back to legacy providers.
+ */
 app.get('/api/price/:ticker', async (req, res) => {
   const ticker = req.params.ticker.toUpperCase().trim()
   if (!ticker || ticker.length > 10) {
@@ -99,7 +102,15 @@ app.get('/api/price/:ticker', async (req, res) => {
   }
 
   try {
-    const candles = await fetchPriceHistory(ticker, '6mo', '1d')
+    let candles = null
+
+    // Only use Alpaca via the official SDK for price history.
+    // This matches the behaviour of the standalone test scripts.
+    const isEquityLike = /^[A-Z.\-]{1,8}$/.test(ticker)
+    if (isEquityLike) {
+      candles = await fetchAlpacaDailySdk(ticker, 180)
+    }
+
     if (!candles || candles.length === 0) {
       return res.status(502).json({ error: 'No price data available', ticker })
     }
@@ -117,7 +128,7 @@ app.get('/api/price/:ticker', async (req, res) => {
       prevClose,
       changePct,
       asOf: last?.date || null,
-      source: 'alpaca_pref_alpha_vantage_yahoo_fallback',
+      source: candles?.[0]?.provider || 'alpaca_sdk_pref_legacy_fallback',
     })
   } catch (err) {
     console.error('[price] error:', err.message)

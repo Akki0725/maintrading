@@ -11,16 +11,16 @@
 │                     APEX v2.0 STACK                             │
 ├────────────────────────┬────────────────────────────────────────┤
 │  Frontend (Vite/React) │  Backend (Node/Express)                │
-│  ─────────────────────  │  ──────────────────────────────────── │
-│  ConvergenceTree        │  server.js          :3001             │
-│  (React Flow XAI UI)    │  pipeline.js        (orchestrator)    │
-│                         │  layers/            (9 modules)       │
-│  Discovery Page         │  discovery/scanner  (universe scan)   │
-│  Memory Page            │  memory/vectorStore (SQLite + cosine) │
-│  Dashboard / Analysis   │  utils/fetcher      (YF, Reddit, ...)  │
-│                         │  utils/scorer       (normalise/RSI)    │
-│  useBackend.js hook     │  data/apex_memory.db                  │
-│  (live + mock fallback) │                                       │
+│  ───────────────────── │  ────────────────────────────────────  │
+│  ConvergenceTree       │  server.js          :3001              │
+│  (React Flow XAI UI)   │  pipeline.js        (orchestrator)     │
+│                        │  layers/            (9 modules)        │
+│  Discovery Page        │  discovery/scanner  (universe scan)    │
+│  Memory Page           │  memory/vectorStore (SQLite + cosine)  │
+│  Dashboard / Analysis  │  utils/fetcher      (YF, Reddit, ...)  │
+│                        │  utils/scorer       (normalise/RSI)    │
+│  useBackend.js hook    │  data/apex_memory.db                   │
+│  (live + mock fallback)│                                        │
 └────────────────────────┴────────────────────────────────────────┘
 ```
 
@@ -82,24 +82,23 @@ Stage 4: Execution Timing  MOMT + OPTN
 
 ## The 9 Layer Modules
 
-| File | Stage | Data Sources | Fallback |
-|------|-------|-------------|---------|
-| `layers/macro.js`       | 0A | YF: VIX, TNX, IRX, SPY | deterministic mock |
-| `layers/sector.js`      | 0B | YF: sector ETF, SPY, ticker | deterministic mock |
-| `layers/event.js`       | 1A | YF News API (25 headlines) | deterministic mock |
-| `layers/sentiment.js`   | 1B | Reddit WSB + /r/stocks + YF News | deterministic mock |
-| `layers/fundamental.js` | 2A | YF Summary: earnings, EPS, guidance | deterministic mock |
-| `layers/commodity.js`   | 2B | YF: sector-specific commodities | deterministic mock |
-| `layers/historical.js`  | 3  | APEX memory DB (cosine search) | static analogs |
-| `layers/momentum.js`    | 4A | YF Chart: RSI, MACD, MA crossovers | deterministic mock |
-| `layers/options.js`     | 4B | YF Options Chain: PCR, IV, unusual activity | deterministic mock |
+|          File          | Stage |                   Data Sources                 |
+|------------------------|-------|------------------------------------------------|
+| `layers/macro.js`      |  0A   | YF: VIX, TNX, IRX, SPY                         |
+| `layers/sector.js`     |  0B   | YF: sector ETF, SPY, ticker                    |
+| `layers/event.js`      |  1A   | YF News API (25 headlines)                     |
+| `layers/sentiment.js`  |  1B   | Reddit WSB + /r/stocks + YF News               |
+| `layers/fundamental.js`|  2A   | YF Summary: earnings, EPS, guidance            |
+| `layers/commodity.js`  |  2B   | YF: sector-specific commodities                |
+| `layers/historical.js` |  3    | APEX memory DB (cosine search)                 |
+| `layers/momentum.js`   |  4A   | YF Chart: RSI, MACD, MA crossovers             |
+| `layers/options.js`    |  4B   | YF Options Chain: PCR, IV, unusual activity    |
 
 Every layer:
-1. Tries live data first
-2. Falls back to deterministic mock if network fails
-3. Returns `_context` object for downstream layers to consume
-4. Returns `subSignals[]` for the drilldown sidebar
-5. Returns `sparkline[16]` for the node sparkline display
+1. Uses live data
+2. Returns `_context` object for downstream layers to consume
+3. Returns `subSignals[]` for the drilldown sidebar
+4. Returns `sparkline[16]` for the node sparkline display
 
 ---
 
@@ -237,7 +236,7 @@ trading-system/
 │   ├── hooks/
 │   │   └── useBackend.js             ← live/mock auto-fallback hook
 │   ├── data/
-│   │   └── mockData.js               ← mock generator
+│   │   └── constants.js              ← STOCKS, TICKER_DATA, LAYERS, MARKET_EVENTS
 │   ├── utils/
 │   │   └── convergenceLogic.js       ← local tree builder (mock mode)
 │   └── pages/

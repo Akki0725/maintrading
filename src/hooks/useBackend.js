@@ -2,7 +2,6 @@
 // React hook for APEX backend with automatic mock fallback
 
 import { useState, useCallback, useRef } from 'react'
-import { generateLayerSignals } from '../data/mockData'
 
 // With Vite proxy configured, '/api' calls are proxied to localhost:3001
 // Fallback: direct connection if not using Vite dev server
@@ -84,17 +83,15 @@ export function useAnalysis() {
         return data
       } catch (err) {
         if (err.name === 'AbortError') return
-        console.warn('[useAnalysis] Live failed, falling back to mock:', err.message)
+        console.warn('[useAnalysis] Live failed:', err.message)
       }
     }
 
-    // ── Mock fallback ─────────────────────────────────────────
-    const signals = generateLayerSignals(ticker)
     setState({
-      signals,
+      signals: [],
       loading: false,
-      error: null,
-      source: 'mock',
+      error: 'Backend unavailable',
+      source: null,
       metadata: { ticker, timestamp: new Date().toISOString(), elapsed: 0, dataSources: null, memoryAlerts: [] },
     })
   }, [])
@@ -124,25 +121,11 @@ export function useDiscovery() {
       }
     }
 
-    // ── Mock discovery fallback ───────────────────────────────
-    const STOCKS = ['NVDA', 'XOM', 'AAPL', 'TSLA', 'META', 'AMD', 'JPM', 'CVX', 'MSFT', 'GOOGL', 'NFLX', 'CRM']
-    const mockResults = STOCKS.map(ticker => {
-      const sigs = generateLayerSignals(ticker)
-      const avgScore = sigs.reduce((a, s) => a + s.score, 0) / sigs.length
-      const convergence = Math.abs(avgScore)
-      const direction = avgScore > 0.05 ? 'BULLISH' : avgScore < -0.05 ? 'BEARISH' : 'NEUTRAL'
-      let thesis = 'MONITOR'
-      if (convergence > 0.45 && avgScore > 0) thesis = 'MOMENTUM_BREAKOUT'
-      else if (convergence > 0.40 && avgScore < 0) thesis = 'HIGH_CONVICTION_SHORT'
-      else if (convergence > 0.30) thesis = 'WATCH'
-      const seed = ticker.split('').reduce((a, c) => a + c.charCodeAt(0), 0)
-      const price = 50 + (seed % 900)
-      return { ticker, sector: 'Technology', score: +avgScore.toFixed(3), convergence: +convergence.toFixed(3), direction, thesis, lastPrice: price, ret5d: +(avgScore * 8).toFixed(2), momentumScore: sigs.find(s => s.id === 'momentum')?.score || 0, sentimentScore: sigs.find(s => s.id === 'sentiment')?.score || 0, newsCount: 0, isLive: false, topHeadline: null }
-    }).sort((a, b) => b.convergence - a.convergence).slice(0, limit)
-
     setState({
-      results: { timestamp: new Date().toISOString(), elapsed: 0, scanned: STOCKS.length, results: mockResults, universe: STOCKS },
-      loading: false, error: null, source: 'mock',
+      results: null,
+      loading: false,
+      error: 'Backend unavailable',
+      source: null,
     })
   }, [])
 

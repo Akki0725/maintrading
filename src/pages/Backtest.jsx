@@ -1,6 +1,23 @@
 import { useState, useMemo } from 'react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, ReferenceLine } from 'recharts'
-import { generateBacktestResults } from '../data/mockData'
+function emptyBacktestResults() {
+  const d = new Date().toISOString().split('T')[0]
+  return {
+    trades: [],
+    equityCurve: [{ date: d, equity: 100000 }],
+    stats: {
+      totalReturn: 0,
+      winRate: 0,
+      totalTrades: 0,
+      avgWin: 0,
+      avgLoss: 0,
+      profitFactor: 0,
+      sharpe: 0,
+      maxDrawdown: 0,
+      finalEquity: 100000,
+    },
+  }
+}
 
 function CustomTooltip({ active, payload, label }) {
   if (active && payload && payload.length) {
@@ -33,7 +50,7 @@ function StatCard({ label, value, sub, color = '#e8e8f0', highlight = false }) {
 }
 
 export default function Backtest() {
-  const [results] = useState(() => generateBacktestResults())
+  const [results] = useState(() => emptyBacktestResults())
   const [weightConfig, setWeightConfig] = useState({
     fundamental: 15,
     momentum: 12,

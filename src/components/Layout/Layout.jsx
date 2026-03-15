@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { TICKER_DATA, MARKET_EVENTS } from '../../data/mockData'
+import { TICKER_DATA, MARKET_EVENTS } from '../../data/constants'
 import { checkBackend, resetBackendCache } from '../../hooks/useBackend'
 
 const NAV_ITEMS = [

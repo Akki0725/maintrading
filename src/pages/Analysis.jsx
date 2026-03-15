@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
-import { STOCKS, LAYERS, generateLayerSignals, generatePrediction } from '../data/mockData'
+import { STOCKS, LAYERS } from '../data/constants'
+import { generatePrediction } from '../utils/prediction'
+import { useAnalysis } from '../hooks/useBackend'
 
 function CustomTooltip({ active, payload, label }) {
   if (active && payload && payload.length) {
@@ -112,24 +114,22 @@ function LayerDetailPanel({ layer }) {
 }
 
 export default function Analysis({ selectedStock, setSelectedStock }) {
-  const [signals, setSignals] = useState([])
+  const { signals, analyze } = useAnalysis()
   const [prediction, setPrediction] = useState(null)
   const [compareStock, setCompareStock] = useState(null)
-  const [compareSignals, setCompareSignals] = useState([])
+  const compareSignals = []
 
   useEffect(() => {
-    const s = generateLayerSignals(selectedStock)
-    setSignals(s)
-    setPrediction(generatePrediction(s))
-  }, [selectedStock])
+    analyze(selectedStock)
+  }, [selectedStock, analyze])
 
   useEffect(() => {
-    if (compareStock) {
-      setCompareSignals(generateLayerSignals(compareStock))
+    if (signals.length > 0) {
+      setPrediction(generatePrediction(signals))
     } else {
-      setCompareSignals([])
+      setPrediction(null)
     }
-  }, [compareStock])
+  }, [signals])
 
   const radarData = signals.map(s => ({
     layer: s.shortName,

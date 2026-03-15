@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { STOCKS, generatePriceHistory, generatePrediction } from '../data/mockData'
+import { STOCKS } from '../data/constants'
+import { generatePrediction } from '../utils/prediction'
 import ConvergenceTree from '../components/ConvergenceTree/ConvergenceTree'
 import { useAnalysis, checkBackend } from '../hooks/useBackend'
 
@@ -92,8 +93,8 @@ export default function Dashboard({ selectedStock, setSelectedStock }) {
       const isLive = await checkBackend()
       if (!isLive) {
         if (!cancelled) {
-          setPriceHistory(generatePriceHistory(stock.price))
-          setLivePrice(stock.price)
+          setPriceHistory([])
+          setLivePrice(stock.price ?? 0)
         }
         return
       }
@@ -114,8 +115,8 @@ export default function Dashboard({ selectedStock, setSelectedStock }) {
         setLivePrice(typeof data.lastPrice === 'number' && data.lastPrice > 0 ? data.lastPrice : lastClose)
       } catch {
         if (cancelled) return
-        setPriceHistory(generatePriceHistory(stock.price))
-        setLivePrice(stock.price)
+        setPriceHistory([])
+        setLivePrice(stock.price ?? 0)
       }
     })()
 
@@ -169,7 +170,7 @@ export default function Dashboard({ selectedStock, setSelectedStock }) {
           )}
           {dataSource && !analysisLoading && (
             <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9, color: dataSource === 'live' ? '#00ff88' : '#404060' }}>
-              ● {dataSource === 'live' ? 'LIVE DATA' : 'MOCK DATA'}
+              ● {dataSource === 'live' ? 'LIVE DATA' : 'NO DATA'}
             </span>
           )}
           {metadata?.elapsed > 0 && (

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useMemory } from '../hooks/useBackend'
-import { STOCKS } from '../data/mockData'
+import { STOCKS } from '../data/constants'
 
 const VECTOR_LABELS = ['MACRO', 'SECT', 'EVENT', 'SENT', 'FUND', 'CMDTY', 'HIST', 'MOMT', 'OPTN']
 
