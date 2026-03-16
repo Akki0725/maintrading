@@ -178,11 +178,35 @@ async function fetchYFSummary(ticker, modules = 'financialData,defaultKeyStatist
 
 /**
  * Yahoo Finance news search
+ * (Legacy; new layers should prefer fetchAVNews for structured news + sentiment.)
  */
 async function fetchYFNews(ticker, count = 20) {
   const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=${count}&enableFuzzyQuery=false&quotesCount=0`
   const data = await safeFetch(url, { _label: `YF news ${ticker}` })
   return data?.news || []
+}
+
+/**
+ * Alpha Vantage NEWS_SENTIMENT feed — returns raw "feed" array or null.
+ * Callers can project / score this differently per layer (events vs sentiment).
+ */
+async function fetchAVNews(ticker, limit = 50) {
+  const key = process.env.ALPHA_VANTAGE_KEY
+  if (!key || key === 'your_alpha_vantage_key_here') return null
+
+  const params = new URLSearchParams({
+    function: 'NEWS_SENTIMENT',
+    tickers: ticker,
+    sort: 'LATEST',
+    limit: String(limit),
+    apikey: key,
+  })
+
+  const url = `https://www.alphavantage.co/query?${params.toString()}`
+  const data = await safeFetch(url, { _label: `AV news ${ticker}` })
+  const feed = data?.feed
+  if (!Array.isArray(feed) || feed.length === 0) return null
+  return feed
 }
 
 /**
@@ -225,4 +249,5 @@ module.exports = {
   fetchYFOptions,
   fetchReddit,
   fetchFRED,
+  fetchAVNews,
 }

@@ -1,8 +1,10 @@
 // backend/layers/event.js
-// Stage 1A — Catalyst Detection: scrape live news, classify event type
+// Stage 1A — Catalyst Detection: event-focused view of Alpha Vantage news snapshot
 
-const { fetchYFNews } = require('../utils/fetcher')
-const { scoreText, deterministicScore, clamp } = require('../utils/scorer')
+const fs = require('fs')
+const path = require('path')
+
+const { scoreText, clamp } = require('../utils/scorer')
 
 const LAYER_ID = 'event'
 
@@ -22,11 +24,51 @@ const EVENT_MAGNITUDE = {
   PRODUCT: 0.5, MACRO: 0.6, MANAGEMENT: 0.5, NONE: 0.2,
 }
 
+function parseTimePublished(str, fallbackTs) {
+  if (!str) return fallbackTs
+  // Alpha Vantage format: YYYYMMDDTHHMMSS (or HHMM)
+  try {
+    const year = Number(str.slice(0, 4))
+    const month = Number(str.slice(4, 6)) - 1
+    const day = Number(str.slice(6, 8))
+    const hour = Number(str.slice(9, 11) || '0')
+    const min = Number(str.slice(11, 13) || '0')
+    const sec = Number(str.slice(13, 15) || '0')
+    const ms = Date.UTC(year, month, day, hour, min, sec)
+    return isNaN(ms) ? fallbackTs : ms / 1000
+  } catch {
+    return fallbackTs
+  }
+}
+
+function loadNewsSnapshot(ticker) {
+  const file = path.join(__dirname, '..', 'alpha-news-output.json')
+  const raw = fs.readFileSync(file, 'utf8')
+  const data = JSON.parse(raw)
+  const feed = Array.isArray(data.feed) ? data.feed : []
+
+  // Filter to items actually tagged with this ticker when possible
+  const upper = String(ticker || '').toUpperCase()
+  const filtered = feed.filter(item => {
+    const ts = item.ticker_sentiment
+    if (!Array.isArray(ts) || !upper) return true
+    return ts.some(t => String(t.ticker || '').toUpperCase() === upper)
+  })
+
+  const now = Date.now() / 1000
+  return (filtered.length > 0 ? filtered : feed).map(item => ({
+    title: item.title,
+    summary: item.summary || '',
+    providerPublishTime: parseTimePublished(item.time_published, now),
+    url: item.url,
+  }))
+}
+
 async function analyze(ticker, context = {}) {
   const sources = { live: false }
 
   try {
-    const news = await fetchYFNews(ticker, 25)
+    const news = loadNewsSnapshot(ticker)
     if (!news || news.length === 0) throw new Error('No news data')
     sources.live = true
 
@@ -58,6 +100,9 @@ async function analyze(ticker, context = {}) {
     const eventTypes = [...new Set(scored.slice(0, 10).map(a => a.eventType).filter(t => t !== 'NONE'))]
     const primaryEvent = eventTypes[0] || 'NONE'
 
+    // Articles that were actually classified as specific events
+    const eventArticles = scored.filter(a => a.eventType !== 'NONE')
+
     // ── Volume signal: lots of news = catalyst is brewing ─────
     const newsVolumeScore = clamp(news.length / 20 - 0.4)  // >8 articles = positive catalyst signal
 
@@ -82,7 +127,23 @@ async function analyze(ticker, context = {}) {
         { name: 'Event Magnitude',     score: +(EVENT_MAGNITUDE[primaryEvent] * Math.sign(score)).toFixed(2) },
       ],
       sparkline: Array(16).fill(0).map((_, i) => Math.sin(i * 0.4) * 0.3 + score * (i / 15)),
-      rawData: { newsCount: news.length, recent24h: recent24h.length, primaryEvent, eventTypes, topHeadlines },
+      rawData: {
+        newsCount: news.length,
+        recent24h: recent24h.length,
+        primaryEvent,
+        eventTypes,
+        topHeadlines,
+        // Top event-classified articles with full text so the UI
+        // can surface the most relevant raw news driving this layer.
+        eventArticles: eventArticles.slice(0, 10).map(a => ({
+          title: a.title,
+          summary: a.summary,
+          eventType: a.eventType,
+          sentiment: +a.sentiment.toFixed(3),
+          ts: a.ts,
+          url: a.url,
+        })),
+      },
       sources,
       _context: {
         eventType: primaryEvent,
@@ -94,24 +155,8 @@ async function analyze(ticker, context = {}) {
       },
     }
   } catch (err) {
-    const score = deterministicScore(ticker, LAYER_ID, (context.regimeScore || 0) * 0.2)
-    return {
-      id: LAYER_ID,
-      score,
-      confidence: 0.42,
-      weight: 0.10,
-      reasoning: fallbackReasoning(ticker, score),
-      subSignals: [
-        { name: 'News Sentiment',   score: +score.toFixed(2) },
-        { name: 'News Volume',      score: +(score * 0.7).toFixed(2) },
-        { name: 'Recency',          score: +(score * 0.5).toFixed(2) },
-        { name: 'Event Magnitude',  score: +(score * 0.8).toFixed(2) },
-      ],
-      sparkline: Array(16).fill(0).map((_, i) => score * (i / 15)),
-      rawData: { source: 'mock' },
-      sources,
-      _context: { eventType: 'UNKNOWN', isGeopolitical: false, isEarnings: false, catalystStrength: 0, boostCommodity: false, boostMacro: false },
-    }
+    // Surface the error so the caller knows the snapshot is missing/invalid.
+    throw err
   }
 }
 
@@ -130,14 +175,6 @@ function buildReasoning(ticker, total, recent, primary, types, score, headlines)
                    : score < -0.3 ? 'News tone is negative — potential headwinds from current events.'
                    : 'Mixed or neutral news environment.'
   return `${total} news articles found for ${ticker}. ${recencyStr} ${typeStr} ${headStr} ${sentStr}`
-}
-
-function fallbackReasoning(ticker, score) {
-  return score > 0.2
-    ? `Positive catalyst activity detected around ${ticker}. Recent news flow suggests bullish developments that could act as a near-term price driver.`
-    : score < -0.2
-    ? `Negative event signals around ${ticker}. News flow indicates potential headwinds. Market may have not yet fully priced this in.`
-    : `No dominant catalyst identified for ${ticker}. News flow is routine with no unusual event classification detected.`
 }
 
 module.exports = { analyze }
