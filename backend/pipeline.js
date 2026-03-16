@@ -2,16 +2,18 @@
 // Sequential 5-Stage Filtration Pipeline
 // Each stage influences the next via a shared context object
 
-const macroLayer     = require('./layers/macro')
-const sectorLayer    = require('./layers/sector')
-const eventLayer     = require('./layers/event')
-const sentimentLayer = require('./layers/sentiment')
-const fundLayer      = require('./layers/fundamental')
-const cmdtyLayer     = require('./layers/commodity')
-const histLayer      = require('./layers/historical')
-const momtLayer      = require('./layers/momentum')
-const optnLayer      = require('./layers/options')
+const macroLayer       = require('./layers/macro')
+const sectorLayer      = require('./layers/sector')
+const eventLayer       = require('./layers/event')
+const sentimentLayer   = require('./layers/sentiment')
+const infoCatalystLayer = require('./layers/infoCatalyst')
+const fundLayer        = require('./layers/fundamental')
+const cmdtyLayer       = require('./layers/commodity')
+const histLayer        = require('./layers/historical')
+const momtLayer        = require('./layers/momentum')
+const optnLayer        = require('./layers/options')
 const { buildVector } = require('./memory/vectorStore')
+const { resetReasoningCallCount } = require('./utils/llmClient')
 
 // ── Layer meta (for frontend colour/icon mapping) ─────────────
 const LAYER_META = {
@@ -19,6 +21,7 @@ const LAYER_META = {
   sector:      { name: 'Sector & Industry',    shortName: 'SECT',  icon: '🏭', color: '#8855ff' },
   event:       { name: 'Event Detection',      shortName: 'EVENT', icon: '⚠️', color: '#ffcc00' },
   sentiment:   { name: 'News Sentiment',       shortName: 'SENT',  icon: '📰', color: '#ff6644' },
+  info_catalyst: { name: 'Information Catalyst', shortName: 'INFO', icon: '🧠', color: '#00ffaa' },
   fundamental: { name: 'Fundamental Earnings', shortName: 'FUND',  icon: '📊', color: '#4466ff' },
   commodity:   { name: 'Commodity & Supply Chain', shortName: 'CMDTY', icon: '⛽', color: '#ffaa00' },
   historical:  { name: 'Historical Analog',    shortName: 'HIST',  icon: '📈', color: '#00ff88' },
@@ -47,6 +50,7 @@ function enrichSignal(signal) {
 async function runPipeline(ticker) {
   console.log(`[pipeline] Starting ${ticker}...`)
   const t0 = Date.now()
+  resetReasoningCallCount()
 
   // ── Stage 0: Big Picture ──────────────────────────────────────
   console.log(`[pipeline] Stage 0: Macro + Sector`)
@@ -67,21 +71,38 @@ async function runPipeline(ticker) {
   }
 
   // ── Stage 1: Catalyst Detection ───────────────────────────────
-  console.log(`[pipeline] Stage 1: Event + Sentiment`)
-  const [eventResult, sentimentResult] = await Promise.all([
+  console.log(`[pipeline] Stage 1: Event + Sentiment + InfoCatalyst`)
+  const [eventResult, sentimentResult, infoCatalystResult] = await Promise.all([
     eventLayer.analyze(ticker, ctx0),
     sentimentLayer.analyze(ticker, { ...ctx0, eventScore: 0 }),  // first pass
+    infoCatalystLayer.analyze(ticker, ctx0).catch(err => {
+      console.error('[pipeline] info_catalyst error (soft-fail):', err.message)
+      return {
+        id: 'info_catalyst',
+        score: 0,
+        confidence: 0.1,
+        weight: 0.0,
+        reasoning: `info_catalyst layer unavailable: ${err.message}`,
+        subSignals: [],
+        sparkline: Array(16).fill(0),
+        rawData: { error: err.message },
+        sources: { live: false, llm: false },
+        _context: { dominantCatalyst: 'NONE', catalystStrength: 0 },
+      }
+    }),
   ])
 
   const ctx1 = {
     ...ctx0,
     ...eventResult._context,
     ...sentimentResult._context,
+    ...infoCatalystResult._context,
     eventScore:        eventResult.score,
     sentimentScore:    sentimentResult.score,
+    infoCatalystScore: infoCatalystResult.score,
     isGeopolitical:    eventResult._context?.isGeopolitical || false,
     isEarnings:        eventResult._context?.isEarnings || false,
-    catalystStrength:  eventResult._context?.catalystStrength || 0,
+    catalystStrength:  infoCatalystResult._context?.catalystStrength || eventResult._context?.catalystStrength || 0,
     boostCommodity:    eventResult._context?.boostCommodity || false,
     boostMacro:        eventResult._context?.boostMacro || false,
   }
@@ -134,6 +155,7 @@ async function runPipeline(ticker) {
     enrichSignal(sectorResult),
     enrichSignal(eventResult),
     enrichSignal(sentimentRefined),
+    enrichSignal(infoCatalystResult),
     enrichSignal(fundResult),
     enrichSignal(cmdtyResult),
     enrichSignal(histResult),

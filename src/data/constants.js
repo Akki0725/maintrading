@@ -38,6 +38,7 @@ export const LAYERS = [
   { id: 'macro', name: 'Macroeconomic', shortName: 'MACRO', icon: '🌐', description: 'Interest rates, inflation, global growth, and recession risk', color: '#ff55aa' },
   { id: 'options', name: 'Options Market', shortName: 'OPTN', icon: '🎯', description: 'Implied volatility, unusual activity, and put/call ratios', color: '#55ffcc' },
   { id: 'event', name: 'Event Detection', shortName: 'EVENT', icon: '⚠️', description: 'Detects earnings, policy changes, geopolitical events, and catalysts', color: '#ffcc00' },
+  { id: 'info_catalyst', name: 'Information Catalyst', shortName: 'INFO', icon: '🧠', description: 'LLM-extracted catalysts, novelty-weighted decay, and historical news pattern lookup', color: '#00ffaa' },
 ]
 
 // Placeholder so Layout has something to show; replace with API feed when available

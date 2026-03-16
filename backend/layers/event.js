@@ -5,6 +5,7 @@ const fs = require('fs')
 const path = require('path')
 
 const { scoreText, clamp } = require('../utils/scorer')
+const { generateLayerReasoning } = require('../utils/llmClient')
 
 const LAYER_ID = 'event'
 
@@ -65,7 +66,7 @@ function loadNewsSnapshot(ticker) {
 }
 
 async function analyze(ticker, context = {}) {
-  const sources = { live: false }
+  const sources = { live: false, llm: false }
 
   try {
     const news = loadNewsSnapshot(ticker)
@@ -86,7 +87,7 @@ async function analyze(ticker, context = {}) {
       const eventType = classifyEvent(text)
       const magnitude = EVENT_MAGNITUDE[eventType] || 0.2
 
-      return { title: article.title, sentiment, recency, eventType, magnitude, ts }
+      return { title: article.title, summary: article.summary || '', url: article.url, sentiment, recency, eventType, magnitude, ts }
     })
 
     // ── Recency-weighted average sentiment ───────────────────
@@ -113,13 +114,68 @@ async function analyze(ticker, context = {}) {
     const score = clamp(weightedSent * 0.65 + newsVolumeScore * 0.20 + (isEarnings ? 0.10 : 0) + (isGeopol ? -0.05 : 0))
 
     const topHeadlines = scored.slice(0, 5).map(a => a.title).filter(Boolean)
+    const confidence = +Math.min(0.88, 0.45 + (recent24h.length / 8) * 0.4).toFixed(2)
+
+    const magVal = EVENT_MAGNITUDE[primaryEvent] || 0.2
+    const eventMagnitudeLabel = magVal >= 0.7 ? 'HIGH' : magVal >= 0.4 ? 'MEDIUM' : 'LOW'
+    const marketImpact = score > 0.2 ? 'POSITIVE' : score < -0.2 ? 'NEGATIVE' : 'NEUTRAL'
+
+    const eventArticlesForRaw = eventArticles.slice(0, 10).map(a => ({
+      title: a.title,
+      summary: a.summary,
+      eventType: a.eventType,
+      sentiment: +a.sentiment.toFixed(3),
+      ts: a.ts,
+      url: a.url,
+    }))
+    const rawData = {
+      newsCount: news.length,
+      recent24h: recent24h.length,
+      primaryEvent,
+      eventTypes,
+      topHeadlines,
+      headlineList: topHeadlines,
+      eventArticles: eventArticlesForRaw,
+      articleSummaries: news.slice(0, 10).map(a => ({ title: a.title || '', summary: (a.summary || '').slice(0, 280), url: a.url })),
+      metrics: {
+        newsCount: news.length,
+        recent24h: recent24h.length,
+        primaryEvent,
+        eventTypes,
+        eventMagnitudeLabel,
+        marketImpact,
+      },
+    }
+
+    let reasoning = buildReasoning(ticker, news.length, recent24h.length, primaryEvent, eventTypes, score, topHeadlines)
+    try {
+      const geminiReasoning = await generateLayerReasoning({
+        ticker,
+        layerId: LAYER_ID,
+        score,
+        confidence,
+        subSignals: [
+          { name: 'News Sentiment Avg', score: +clamp(weightedSent).toFixed(2) },
+          { name: 'News Volume', score: +newsVolumeScore.toFixed(2) },
+          { name: 'Recency Boost', score: +(recent24h.length > 2 ? 0.3 : 0).toFixed(2) },
+          { name: 'Event Magnitude', score: +(EVENT_MAGNITUDE[primaryEvent] * Math.sign(score)).toFixed(2) },
+        ],
+        rawData,
+      })
+      if (geminiReasoning) {
+        reasoning = geminiReasoning
+        sources.llm = true
+      }
+    } catch (err) {
+      console.error('[event] generateLayerReasoning fallback:', err.message)
+    }
 
     return {
       id: LAYER_ID,
       score: +score.toFixed(3),
-      confidence: +Math.min(0.88, 0.45 + (recent24h.length / 8) * 0.4).toFixed(2),
+      confidence,
       weight: 0.10,
-      reasoning: buildReasoning(ticker, news.length, recent24h.length, primaryEvent, eventTypes, score, topHeadlines),
+      reasoning,
       subSignals: [
         { name: 'News Sentiment Avg',  score: +clamp(weightedSent).toFixed(2) },
         { name: 'News Volume',         score: +newsVolumeScore.toFixed(2) },
@@ -127,23 +183,7 @@ async function analyze(ticker, context = {}) {
         { name: 'Event Magnitude',     score: +(EVENT_MAGNITUDE[primaryEvent] * Math.sign(score)).toFixed(2) },
       ],
       sparkline: Array(16).fill(0).map((_, i) => Math.sin(i * 0.4) * 0.3 + score * (i / 15)),
-      rawData: {
-        newsCount: news.length,
-        recent24h: recent24h.length,
-        primaryEvent,
-        eventTypes,
-        topHeadlines,
-        // Top event-classified articles with full text so the UI
-        // can surface the most relevant raw news driving this layer.
-        eventArticles: eventArticles.slice(0, 10).map(a => ({
-          title: a.title,
-          summary: a.summary,
-          eventType: a.eventType,
-          sentiment: +a.sentiment.toFixed(3),
-          ts: a.ts,
-          url: a.url,
-        })),
-      },
+      rawData,
       sources,
       _context: {
         eventType: primaryEvent,

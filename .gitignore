@@ -4,3 +4,5 @@ backend/node_modules
 backend/.env
 .DS_Store
 *.log
+backend/data/*.db
+backend/alpha-news-output.json

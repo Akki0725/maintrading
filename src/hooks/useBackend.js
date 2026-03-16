@@ -28,7 +28,7 @@ async function checkBackend() {
 
 // Map backend pipeline result signals to frontend format
 function normaliseSignals(backendSignals) {
-  return backendSignals.map(s => ({
+  return (backendSignals || []).map(s => ({
     ...s,
     score:      s.score      ?? 0,
     confidence: s.confidence ?? 0.5,
@@ -39,6 +39,15 @@ function normaliseSignals(backendSignals) {
   }))
 }
 
+// Per-ticker analysis cache so Dashboard and Layer Analysis share results and tab switch is instant
+const CACHE_TTL_MS = 60000
+const analysisCache = new Map()
+
+export function clearAnalysisCache(ticker = null) {
+  if (ticker) analysisCache.delete((ticker || '').toUpperCase().trim())
+  else analysisCache.clear()
+}
+
 // ─────────────────────────────────────────────────────────────
 // useAnalysis — run full 9-layer pipeline for a ticker
 // ─────────────────────────────────────────────────────────────
@@ -46,8 +55,25 @@ export function useAnalysis() {
   const [state, setState] = useState({ signals: [], loading: false, error: null, source: null, metadata: null })
   const abortRef = useRef(null)
 
-  const analyze = useCallback(async (ticker) => {
-    // Cancel any in-flight request
+  const analyze = useCallback(async (ticker, force = false) => {
+    const key = (ticker || '').toUpperCase().trim()
+    if (!key) return null
+
+    // Serve from cache if fresh and not forcing refresh
+    if (!force) {
+      const cached = analysisCache.get(key)
+      if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
+        setState({
+          signals:  normaliseSignals(cached.signals),
+          loading:  false,
+          error:    null,
+          source:   'live',
+          metadata: cached.metadata,
+        })
+        return cached.data
+      }
+    }
+
     abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
@@ -65,24 +91,26 @@ export function useAnalysis() {
         })
         if (!res.ok) throw new Error(`Backend error ${res.status}`)
         const data = await res.json()
+        const metadata = {
+          ticker:       data.ticker,
+          timestamp:    data.timestamp,
+          elapsed:      data.elapsed,
+          context:      data.context,
+          dataSources:  data.dataSources,
+          memoryAlerts: data.memoryAlerts || [],
+          snapshotSaved: data.snapshotSaved,
+        }
+        analysisCache.set(key, { signals: data.signals || [], metadata, timestamp: Date.now(), data })
         setState({
           signals:  normaliseSignals(data.signals || []),
           loading:  false,
           error:    null,
           source:   'live',
-          metadata: {
-            ticker:       data.ticker,
-            timestamp:    data.timestamp,
-            elapsed:      data.elapsed,
-            context:      data.context,
-            dataSources:  data.dataSources,
-            memoryAlerts: data.memoryAlerts || [],
-            snapshotSaved: data.snapshotSaved,
-          },
+          metadata,
         })
         return data
       } catch (err) {
-        if (err.name === 'AbortError') return
+        if (err.name === 'AbortError') return null
         console.warn('[useAnalysis] Live failed:', err.message)
       }
     }
@@ -92,8 +120,9 @@ export function useAnalysis() {
       loading: false,
       error: 'Backend unavailable',
       source: null,
-      metadata: { ticker, timestamp: new Date().toISOString(), elapsed: 0, dataSources: null, memoryAlerts: [] },
+      metadata: { ticker: key, timestamp: new Date().toISOString(), elapsed: 0, dataSources: null, memoryAlerts: [] },
     })
+    return null
   }, [])
 
   return { ...state, analyze }
