@@ -240,6 +240,54 @@ async function fetchFRED(seriesId, limit = 10) {
   return data?.observations || null
 }
 
+/**
+ * Financial Modeling Prep helper — appends API key when configured.
+ * Supports FMP_API_KEY or FINANCIAL_MODELING_PREP_API_KEY.
+ */
+async function fetchFMP(path, params = {}, label = 'FMP request') {
+  const key = process.env.FMP_API_KEY || process.env.FINANCIAL_MODELING_PREP_API_KEY
+  const qs = new URLSearchParams()
+
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
+  }
+  const hasKey = key && key !== 'your_fmp_key_here'
+  if (hasKey) qs.set('apikey', key)
+
+  const base = 'https://financialmodelingprep.com'
+  const url = `${base}${path}?${qs.toString()}`
+  return safeFetch(url, {
+    _label: label,
+    headers: {
+      Accept: 'application/json',
+      ...(hasKey ? { apikey: key } : {}),
+    },
+  })
+}
+
+/**
+ * FMP earnings report endpoint — returns array or null.
+ */
+async function fetchFMPEarnings(ticker, limit = 8) {
+  const data = await fetchFMP('/stable/earnings', {
+    symbol: ticker,
+    limit: Math.min(5, Math.max(1, limit)),
+  }, `FMP earnings ${ticker}`)
+  return Array.isArray(data) ? data : null
+}
+
+/**
+ * FMP key metrics endpoint — returns array or null.
+ */
+async function fetchFMPKeyMetrics(ticker, limit = 5, period) {
+  const data = await fetchFMP('/stable/key-metrics', {
+    symbol: ticker,
+    limit: Math.min(5, Math.max(1, limit)),
+    ...(period ? { period } : {}),
+  }, `FMP key-metrics ${ticker}`)
+  return Array.isArray(data) ? data : null
+}
+
 module.exports = {
   safeFetch,
   fetchPriceHistory,
@@ -250,4 +298,6 @@ module.exports = {
   fetchReddit,
   fetchFRED,
   fetchAVNews,
+  fetchFMPEarnings,
+  fetchFMPKeyMetrics,
 }

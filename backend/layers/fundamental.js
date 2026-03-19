@@ -1,7 +1,7 @@
 // backend/layers/fundamental.js
 // Stage 2A — Reality Check: EPS surprises, revenue beats, forward guidance
 
-const { fetchYFSummary } = require('../utils/fetcher')
+const { fetchFMPEarnings, fetchFMPKeyMetrics } = require('../utils/fetcher')
 const { normalise, deterministicScore, clamp } = require('../utils/scorer')
 
 const LAYER_ID = 'fundamental'
@@ -10,62 +10,77 @@ async function analyze(ticker, context = {}) {
   const sources = { live: false }
 
   try {
-    const summary = await fetchYFSummary(ticker,
-      'earnings,earningsTrend,defaultKeyStatistics,financialData,recommendationTrend')
-    if (!summary) throw new Error('No fundamental data')
+    const [earnings, keyMetrics] = await Promise.all([
+      fetchFMPEarnings(ticker, 5),
+      fetchFMPKeyMetrics(ticker, 5),
+    ])
+    if (!earnings?.length && !keyMetrics?.length) throw new Error('No fundamental data')
     sources.live = true
 
-    const fd   = summary.financialData    || {}
-    const ks   = summary.defaultKeyStatistics || {}
-    const et   = summary.earningsTrend    || {}
-    const rec  = summary.recommendationTrend || {}
-    const earn = summary.earnings         || {}
+    const sortedEarnings = (earnings || [])
+      .slice()
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
+    const sortedMetrics = (keyMetrics || [])
+      .slice()
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')))
+
+    const latestCompleteEarnings = [...sortedEarnings].reverse().find(e =>
+      isFiniteNumber(e?.epsActual) &&
+      isFiniteNumber(e?.epsEstimated)
+    ) || null
+
+    const nextEarningsEstimate = sortedEarnings.find(e =>
+      isFiniteNumber(e?.epsEstimated) && !isFiniteNumber(e?.epsActual)
+    ) || null
+
+    const latestMetrics = sortedMetrics.at(-1) || {}
+    const prevMetrics = sortedMetrics.length > 1 ? sortedMetrics.at(-2) : null
 
     // ── EPS Surprise ──────────────────────────────────────────
-    const earningsHistory = earn.earningsChart?.quarterly || []
-    const latestEarnings  = earningsHistory.at(-1)
+    const latestEarnings = latestCompleteEarnings
     let epsSurpriseScore  = 0
-    if (latestEarnings?.actual?.raw != null && latestEarnings?.estimate?.raw != null) {
-      const actual   = latestEarnings.actual.raw
-      const estimate = latestEarnings.estimate.raw
+    if (isFiniteNumber(latestEarnings?.epsActual) && isFiniteNumber(latestEarnings?.epsEstimated)) {
+      const actual = Number(latestEarnings.epsActual)
+      const estimate = Number(latestEarnings.epsEstimated)
       const surprise = estimate !== 0 ? (actual - estimate) / Math.abs(estimate) : 0
       epsSurpriseScore = normalise(surprise, -0.30, 0.30)
     }
 
-    // ── Revenue trend ─────────────────────────────────────────
-    const revenueGrowth = fd.revenueGrowth?.raw ?? 0
-    const revenueScore  = normalise(revenueGrowth, -0.15, 0.25)
+    // ── Revenue surprise/trend proxy ──────────────────────────
+    const revActual = isFiniteNumber(latestEarnings?.revenueActual) ? Number(latestEarnings.revenueActual) : null
+    const revEstimate = isFiniteNumber(latestEarnings?.revenueEstimated) ? Number(latestEarnings.revenueEstimated) : null
+    const revenueSurprise = revActual != null && revEstimate != null && revEstimate !== 0
+      ? (revActual - revEstimate) / Math.abs(revEstimate)
+      : 0
+    const revenueScore = normalise(revenueSurprise, -0.20, 0.20)
 
-    // ── Forward guidance (analyst trend) ─────────────────────
-    const trend = et.trend || []
-    const fwd   = trend.find(t => t.period === '+1q') || trend[0]
+    // ── Forward guidance proxy (next est vs last actual EPS) ──
     let guidanceScore = 0
-    if (fwd?.epsTrend?.current?.raw != null && fwd?.epsRevisions) {
-      const upRevisions   = fwd.epsRevisions.upLast30days?.raw || 0
-      const downRevisions = fwd.epsRevisions.downLast30days?.raw || 0
-      const netRevisions  = upRevisions - downRevisions
-      guidanceScore = normalise(netRevisions, -5, 5)
+    if (isFiniteNumber(nextEarningsEstimate?.epsEstimated) && isFiniteNumber(latestEarnings?.epsActual)) {
+      const nextEstimate = Number(nextEarningsEstimate.epsEstimated)
+      const base = Number(latestEarnings.epsActual) || 1
+      const projectedDelta = (nextEstimate - base) / Math.abs(base)
+      guidanceScore = normalise(projectedDelta, -0.25, 0.25)
     }
 
     // ── Profitability ─────────────────────────────────────────
-    const grossMargin   = fd.grossMargins?.raw ?? 0
-    const operatingMgn  = fd.operatingMargins?.raw ?? 0
-    const marginScore   = normalise(operatingMgn, -0.05, 0.30)
+    const operatingMgn = toRatio(latestMetrics.operatingMarginRatio)
+    const grossMargin = toRatio(latestMetrics.grossProfitMarginRatio)
+    const marginScore = normalise(operatingMgn ?? 0, -0.05, 0.30)
 
-    // ── Analyst recommendations ───────────────────────────────
-    const recHistory = rec.trend || []
-    const latestRec  = recHistory[0]
+    // ── Quality / revision proxy from key metrics ─────────────
     let analystScore = 0
-    if (latestRec) {
-      const buy    = (latestRec.strongBuy?.raw || 0) + (latestRec.buy?.raw || 0)
-      const sell   = (latestRec.strongSell?.raw || 0) + (latestRec.sell?.raw || 0)
-      const total  = buy + sell + (latestRec.hold?.raw || 0)
-      analystScore = total > 0 ? normalise((buy - sell) / total, -0.5, 0.5) : 0
+    if (prevMetrics) {
+      const currentRoe = toRatio(latestMetrics.returnOnEquity)
+      const previousRoe = toRatio(prevMetrics.returnOnEquity)
+      if (currentRoe != null && previousRoe != null) {
+        analystScore = normalise(currentRoe - previousRoe, -0.06, 0.06)
+      }
     }
 
     // ── Valuation (P/E vs growth) ─────────────────────────────
-    const peRatio  = ks.trailingPE?.raw
-    const peg      = ks.pegRatio?.raw
+    const peRatio = numberOrNull(latestMetrics.peRatio)
+    const peg = numberOrNull(latestMetrics.pegRatio)
     const valuationScore = peg != null ? normalise(peg, 3.0, 0.5, true) // PEG < 1 = cheap
                          : peRatio != null ? normalise(peRatio, 80, 10, true) : 0
 
@@ -87,22 +102,22 @@ async function analyze(ticker, context = {}) {
       score: +score.toFixed(3),
       confidence: +Math.min(0.92, 0.55 + Math.abs(epsSurpriseScore) * 0.4).toFixed(2),
       weight: context.isEarnings ? 0.18 : 0.12,  // boosted during earnings season
-      reasoning: buildReasoning(ticker, latestEarnings, revenueGrowth, guidanceScore, analystScore, score),
+      reasoning: buildReasoning(ticker, latestEarnings, revenueSurprise, guidanceScore, analystScore, score),
       subSignals: [
         { name: 'EPS Surprise',       score: +epsSurpriseScore.toFixed(2) },
-        { name: 'Revenue Growth',     score: +revenueScore.toFixed(2) },
-        { name: 'Analyst Revisions',  score: +guidanceScore.toFixed(2) },
+        { name: 'Revenue Surprise',   score: +revenueScore.toFixed(2) },
+        { name: 'Forward Guidance',   score: +guidanceScore.toFixed(2) },
         { name: 'Profitability',      score: +marginScore.toFixed(2) },
-        { name: 'Analyst Consensus',  score: +analystScore.toFixed(2) },
+        { name: 'Quality Trend',      score: +analystScore.toFixed(2) },
       ],
       sparkline: Array(16).fill(0).map((_, i) => Math.cos(i * 0.5) * 0.25 + score * (i / 15)),
       rawData: {
-        revenueGrowth: +(revenueGrowth * 100).toFixed(1),
-        grossMargin:   +(grossMargin * 100).toFixed(1),
-        operatingMargin: +(operatingMgn * 100).toFixed(1),
+        revenueSurprisePct: +(revenueSurprise * 100).toFixed(1),
+        grossMargin:   +(toPercent(grossMargin)).toFixed(1),
+        operatingMargin: +(toPercent(operatingMgn)).toFixed(1),
         peRatio, pegRatio: peg,
         latestEPS: latestEarnings ? {
-          actual: latestEarnings.actual?.raw, estimate: latestEarnings.estimate?.raw
+          actual: latestEarnings.epsActual, estimate: latestEarnings.epsEstimated
         } : null,
       },
       sources,
@@ -118,10 +133,10 @@ async function analyze(ticker, context = {}) {
       reasoning: fallbackReasoning(ticker, score),
       subSignals: [
         { name: 'EPS Surprise',       score: +(score * 1.2).toFixed(2) },
-        { name: 'Revenue Growth',     score: +(score * 0.9).toFixed(2) },
-        { name: 'Analyst Revisions',  score: +(score * 0.7).toFixed(2) },
+        { name: 'Revenue Surprise',   score: +(score * 0.9).toFixed(2) },
+        { name: 'Forward Guidance',   score: +(score * 0.7).toFixed(2) },
         { name: 'Profitability',      score: +(score * 0.8).toFixed(2) },
-        { name: 'Analyst Consensus',  score: +(score * 0.6).toFixed(2) },
+        { name: 'Quality Trend',      score: +(score * 0.6).toFixed(2) },
       ],
       sparkline: Array(16).fill(0).map((_, i) => score * (i / 15)),
       rawData: { source: 'mock' },
@@ -131,16 +146,18 @@ async function analyze(ticker, context = {}) {
   }
 }
 
-function buildReasoning(ticker, latestEPS, revGrowth, guidance, analyst, score) {
+function buildReasoning(ticker, latestEPS, revSurprise, guidance, analyst, score) {
   let epsStr = 'No recent earnings data available.'
-  if (latestEPS?.actual?.raw != null && latestEPS?.estimate?.raw != null) {
-    const diff = ((latestEPS.actual.raw - latestEPS.estimate.raw) / Math.abs(latestEPS.estimate.raw || 1) * 100)
-    epsStr = `Latest EPS: $${latestEPS.actual.raw.toFixed(2)} vs $${latestEPS.estimate.raw.toFixed(2)} estimate (${diff >= 0 ? '+' : ''}${diff.toFixed(1)}% surprise).`
+  if (isFiniteNumber(latestEPS?.epsActual) && isFiniteNumber(latestEPS?.epsEstimated)) {
+    const actual = Number(latestEPS.epsActual)
+    const estimate = Number(latestEPS.epsEstimated)
+    const diff = ((actual - estimate) / Math.abs(estimate || 1) * 100)
+    epsStr = `Latest EPS: $${actual.toFixed(2)} vs $${estimate.toFixed(2)} estimate (${diff >= 0 ? '+' : ''}${diff.toFixed(1)}% surprise).`
   }
-  const revStr   = `Revenue growth: ${(revGrowth * 100).toFixed(1)}%.`
-  const guidStr  = guidance > 0.1 ? 'Analyst revisions trending upward — positive guidance signal.'
-                 : guidance < -0.1 ? 'Analyst estimates being cut — negative revision cycle.'
-                 : 'Analyst estimates stable with no significant revision trend.'
+  const revStr   = `Revenue surprise: ${(revSurprise * 100).toFixed(1)}%.`
+  const guidStr  = guidance > 0.1 ? 'Forward EPS estimates imply improving near-term guidance.'
+                : guidance < -0.1 ? 'Forward EPS estimates imply softening near-term guidance.'
+                : 'Forward EPS estimates are broadly stable versus recent actuals.'
   return `${epsStr} ${revStr} ${guidStr} Overall fundamental score: ${score > 0 ? 'SUPPORTIVE' : 'CONCERNING'} for ${ticker}.`
 }
 
@@ -150,6 +167,25 @@ function fallbackReasoning(ticker, score) {
     : score < -0.2
     ? `${ticker} showing fundamental weakness. Earnings miss or declining guidance detected. Analyst estimates trending downward. Fundamental backdrop is challenging.`
     : `${ticker} fundamentals are mixed. Earnings roughly in-line with expectations. No strong upward or downward revision trend detected.`
+}
+
+function isFiniteNumber(value) {
+  return Number.isFinite(Number(value))
+}
+
+function numberOrNull(value) {
+  return isFiniteNumber(value) ? Number(value) : null
+}
+
+function toRatio(value) {
+  if (!isFiniteNumber(value)) return null
+  const n = Number(value)
+  // FMP fields can be either 0.21 or 21.0 depending on endpoint/version.
+  return Math.abs(n) > 1 ? n / 100 : n
+}
+
+function toPercent(ratio) {
+  return ratio == null ? 0 : ratio * 100
 }
 
 module.exports = { analyze }
